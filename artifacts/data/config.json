@@ -1,0 +1,11 @@
+{
+  "autoReact": {
+    "enabled": true,
+    "emoji": "🔥"
+  },
+  "clipboardMessenger": {
+    "enabled": false,
+    "channelId": ""
+  },
+  "discordToken": "MTEyODUyNDk5MzEyMzMzMjIxNw.GzGPuR.YlHSa0Vfft8dsc-reN2gJvaQcWAs99bqP1M-4k"
+}

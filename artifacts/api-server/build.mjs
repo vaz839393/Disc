@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
-import { rm } from "node:fs/promises";
+import { rm, cp } from "node:fs/promises";
 
 // Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
 globalThis.require = createRequire(import.meta.url);
@@ -100,6 +100,15 @@ async function buildAll() {
       "puppeteer",
       "puppeteer-core",
       "electron",
+      "ffmpeg-static",
+      "node-opus",
+      "opusscript",
+      "sodium",
+      "libsodium-wrappers",
+      "@discordjs/opus",
+      "prism-media",
+      "discord.js-selfbot-v13",
+      "@discordjs/*",
     ],
     sourcemap: "linked",
     plugins: [
@@ -118,6 +127,10 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     `,
     },
   });
+
+  const publicSrc = path.resolve(artifactDir, "public");
+  const publicDest = path.resolve(distDir, "..", "public");
+  await cp(publicSrc, publicDest, { recursive: true }).catch(() => {});
 }
 
 buildAll().catch((err) => {
