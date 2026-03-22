@@ -1,5 +1,13 @@
 import { Router, type IRouter } from "express";
-import { getBotStatus, restartBot, sendMessage } from "../lib/bot.js";
+import {
+  getBotStatus,
+  restartBot,
+  sendMessage,
+  startAutoSend,
+  stopAutoSend,
+  getAutoSendStatus,
+  updateAutoSendInterval,
+} from "../lib/bot.js";
 import { loadConfig, updateConfig } from "../lib/config.js";
 
 const router: IRouter = Router();
@@ -7,8 +15,10 @@ const router: IRouter = Router();
 router.get("/status", (_req, res) => {
   const bot = getBotStatus();
   const config = loadConfig();
+  const autoSend = getAutoSendStatus();
   res.json({
     bot,
+    autoSend,
     config: {
       autoReact: config.autoReact,
       clipboardMessenger: config.clipboardMessenger,
@@ -58,6 +68,39 @@ router.post("/send-message", async (req, res) => {
   } else {
     res.status(500).json({ success: false, error: result.error });
   }
+});
+
+router.post("/auto-send/start", (req, res) => {
+  const { message, channelId, intervalMs } = req.body as {
+    message?: string;
+    channelId?: string;
+    intervalMs?: number;
+  };
+  if (!message || !channelId) {
+    res.status(400).json({ success: false, error: "Missing message or channelId" });
+    return;
+  }
+  const result = startAutoSend(message, channelId, intervalMs ?? 300);
+  if (result.success) {
+    res.json({ success: true, autoSend: getAutoSendStatus() });
+  } else {
+    res.status(400).json({ success: false, error: result.error });
+  }
+});
+
+router.post("/auto-send/stop", (_req, res) => {
+  stopAutoSend();
+  res.json({ success: true, autoSend: getAutoSendStatus() });
+});
+
+router.post("/auto-send/interval", (req, res) => {
+  const { intervalMs } = req.body as { intervalMs?: number };
+  if (typeof intervalMs !== "number") {
+    res.status(400).json({ success: false, error: "intervalMs must be a number" });
+    return;
+  }
+  updateAutoSendInterval(intervalMs);
+  res.json({ success: true, autoSend: getAutoSendStatus() });
 });
 
 router.post("/change-token", async (req, res) => {

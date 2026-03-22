@@ -288,7 +288,8 @@
     let state = {
       autoReact: { enabled: false, emoji: '👍' },
       clipboardMessenger: { enabled: false, channelId: '' },
-      bot: { status: 'offline', username: null, error: null }
+      bot: { status: 'offline', username: null, error: null },
+      autoSend: { active: false, count: 0, message: '', channelId: '', intervalMs: 300 }
     };
 
     async function fetchStatus() {
@@ -298,6 +299,7 @@
         state.autoReact = data.config.autoReact;
         state.clipboardMessenger = data.config.clipboardMessenger;
         state.bot = data.bot;
+        state.autoSend = data.autoSend;
         renderAll();
       } catch (e) {
         console.error('Status fetch failed', e);
@@ -308,6 +310,7 @@
       renderStatus();
       renderAutoReact();
       renderClipboard();
+      renderAutoSendUI();
     }
 
     function renderStatus() {
@@ -396,67 +399,85 @@
     function updateDelayLabel(val) {
       const ms = parseInt(val);
       document.getElementById('delayLabel').textContent = ms >= 1000 ? (ms / 1000).toFixed(1) + 's' : ms + 'ms';
+      // Notify server of interval change in real time if auto-send is running
+      if (state.autoSend && state.autoSend.active) {
+        fetch(`${API}/auto-send/interval`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ intervalMs: parseInt(val) })
+        }).catch(() => {});
+      }
     }
 
-    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-    async function doSend() {
+    async function sendOnce() {
       const message = document.getElementById('messageInput').value.trim();
       const channelId = document.getElementById('channelIdInput').value.trim() || state.clipboardMessenger.channelId;
-      if (!message) { toast('Message cannot be empty', 'error'); return false; }
-      if (!channelId) { toast('Please enter a Channel ID first', 'error'); return false; }
+      if (!message) return toast('Message cannot be empty', 'error');
+      if (!channelId) return toast('Please enter a Channel ID first', 'error');
+      const btn = document.getElementById('sendOnceBtn');
+      btn.disabled = true; btn.textContent = 'Sending…';
       try {
         const res = await fetch(`${API}/send-message`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message, channelId })
         });
         const data = await res.json();
-        if (!data.success) { toast('Error: ' + (data.error || 'Failed to send'), 'error'); return false; }
-        return true;
-      } catch { toast('Failed to send message', 'error'); return false; }
-    }
-
-    async function sendOnce() {
-      const btn = document.getElementById('sendOnceBtn');
-      btn.disabled = true; btn.textContent = 'Sending…';
-      await doSend();
+        if (data.success) toast('✅ Message sent!', 'success');
+        else toast('Error: ' + (data.error || 'Failed'), 'error');
+      } catch { toast('Failed to send message', 'error'); }
       btn.disabled = false; btn.textContent = 'Send Once';
-      toast('✅ Message sent!', 'success');
     }
-
-    let autoSendActive = false;
-    let sendCount = 0;
 
     async function startAutoSend() {
       const message = document.getElementById('messageInput').value.trim();
       const channelId = document.getElementById('channelIdInput').value.trim() || state.clipboardMessenger.channelId;
       if (!message) return toast('Message cannot be empty', 'error');
       if (!channelId) return toast('Please enter a Channel ID first', 'error');
-
-      autoSendActive = true;
-      sendCount = 0;
-      document.getElementById('sendCount').textContent = '0';
-      document.getElementById('sendStats').style.display = 'block';
-      document.getElementById('startBtn').style.display = 'none';
-      document.getElementById('stopBtn').style.display = '';
-      document.getElementById('sendOnceBtn').disabled = true;
-
-      while (autoSendActive) {
-        const interval = parseInt(document.getElementById('delaySlider').value);
-        const ok = await doSend();
-        if (!ok) { stopAutoSend(); break; }
-        sendCount++;
-        document.getElementById('sendCount').textContent = sendCount;
-        await sleep(interval);
-      }
+      const intervalMs = parseInt(document.getElementById('delaySlider').value);
+      try {
+        const res = await fetch(`${API}/auto-send/start`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message, channelId, intervalMs })
+        });
+        const data = await res.json();
+        if (data.success) {
+          state.autoSend = data.autoSend;
+          renderAutoSendUI();
+          toast('▶ Auto-send running on server', 'success');
+        } else {
+          toast('Error: ' + (data.error || 'Failed to start'), 'error');
+        }
+      } catch { toast('Failed to start auto-send', 'error'); }
     }
 
-    function stopAutoSend() {
-      autoSendActive = false;
-      document.getElementById('startBtn').style.display = '';
-      document.getElementById('stopBtn').style.display = 'none';
-      document.getElementById('sendOnceBtn').disabled = false;
-      toast('⛔ Auto-send stopped after ' + sendCount + ' messages', '');
+    async function stopAutoSend() {
+      try {
+        const res = await fetch(`${API}/auto-send/stop`, { method: 'POST' });
+        const data = await res.json();
+        const count = state.autoSend ? state.autoSend.count : 0;
+        state.autoSend = data.autoSend;
+        renderAutoSendUI();
+        toast('⛔ Auto-send stopped after ' + count + ' messages', '');
+      } catch { toast('Failed to stop auto-send', 'error'); }
+    }
+
+    function renderAutoSendUI() {
+      const active = state.autoSend && state.autoSend.active;
+      document.getElementById('startBtn').style.display = active ? 'none' : '';
+      document.getElementById('stopBtn').style.display = active ? '' : 'none';
+      document.getElementById('sendOnceBtn').disabled = !!active;
+      document.getElementById('sendStats').style.display = active ? 'block' : 'none';
+      if (active) {
+        document.getElementById('sendCount').textContent = state.autoSend.count;
+        // Restore the message and channel if the user came back to the page
+        const msgEl = document.getElementById('messageInput');
+        if (!msgEl.value && state.autoSend.message) msgEl.value = state.autoSend.message;
+        const cidEl = document.getElementById('channelIdInput');
+        if (!cidEl.value && state.autoSend.channelId) cidEl.value = state.autoSend.channelId;
+        // Sync slider to active interval
+        const slider = document.getElementById('delaySlider');
+        slider.value = state.autoSend.intervalMs;
+        updateDelayLabel(state.autoSend.intervalMs);
+      }
     }
 
     async function restartBot() {

@@ -7,6 +7,75 @@ let botStatus: "online" | "offline" | "connecting" | "error" = "offline";
 let botError: string | null = null;
 let botUsername: string | null = null;
 
+// --- Auto-send state (server-side loop) ---
+let autoSendTimer: ReturnType<typeof setTimeout> | null = null;
+let autoSendActive = false;
+let autoSendCount = 0;
+let autoSendMessage = "";
+let autoSendChannelId = "";
+let autoSendIntervalMs = 300;
+
+export function getAutoSendStatus() {
+  return {
+    active: autoSendActive,
+    count: autoSendCount,
+    message: autoSendMessage,
+    channelId: autoSendChannelId,
+    intervalMs: autoSendIntervalMs,
+  };
+}
+
+export function startAutoSend(message: string, channelId: string, intervalMs: number): { success: boolean; error?: string } {
+  if (botStatus !== "online") return { success: false, error: "Bot is not online" };
+  if (!message) return { success: false, error: "Message cannot be empty" };
+  if (!channelId) return { success: false, error: "Channel ID cannot be empty" };
+
+  stopAutoSend(true);
+
+  autoSendActive = true;
+  autoSendCount = 0;
+  autoSendMessage = message;
+  autoSendChannelId = channelId;
+  autoSendIntervalMs = Math.max(300, Math.min(2000, intervalMs));
+
+  logger.info({ channelId, intervalMs: autoSendIntervalMs }, "Auto-send started");
+
+  const tick = async () => {
+    if (!autoSendActive) return;
+    const result = await sendMessage(autoSendChannelId, autoSendMessage);
+    if (result.success) {
+      autoSendCount++;
+    } else {
+      logger.warn({ error: result.error }, "Auto-send failed, stopping");
+      stopAutoSend(true);
+      return;
+    }
+    if (autoSendActive) {
+      autoSendTimer = setTimeout(tick, autoSendIntervalMs);
+    }
+  };
+
+  autoSendTimer = setTimeout(tick, 0);
+  return { success: true };
+}
+
+export function stopAutoSend(silent = false): void {
+  if (autoSendTimer) {
+    clearTimeout(autoSendTimer);
+    autoSendTimer = null;
+  }
+  autoSendActive = false;
+  if (!silent) {
+    logger.info({ count: autoSendCount }, "Auto-send stopped");
+  }
+}
+
+export function updateAutoSendInterval(intervalMs: number): void {
+  autoSendIntervalMs = Math.max(300, Math.min(2000, intervalMs));
+}
+
+// --- Bot lifecycle ---
+
 export function getBotStatus() {
   return {
     status: botStatus,
@@ -28,6 +97,7 @@ export async function startBot(token?: string): Promise<void> {
 
   if (client) {
     logger.info("Destroying existing bot client before restart");
+    stopAutoSend(true);
     try {
       client.removeAllListeners();
       await client.destroy();
@@ -55,10 +125,8 @@ export async function startBot(token?: string): Promise<void> {
 
   client.on("messageCreate", async (message) => {
     const cfg = loadConfig();
-
     if (!cfg.autoReact.enabled) return;
     if (message.author.id !== client?.user?.id) return;
-
     try {
       await message.react(cfg.autoReact.emoji);
     } catch (e) {
@@ -74,6 +142,7 @@ export async function startBot(token?: string): Promise<void> {
 
   client.on("disconnect" as any, () => {
     botStatus = "offline";
+    stopAutoSend(true);
     logger.info("Discord client disconnected");
   });
 
@@ -95,7 +164,6 @@ export async function sendMessage(channelId: string, content: string): Promise<{
   if (!client || botStatus !== "online") {
     return { success: false, error: "Bot is not online" };
   }
-
   try {
     const channel = await client.channels.fetch(channelId);
     if (!channel || !channel.isText()) {
