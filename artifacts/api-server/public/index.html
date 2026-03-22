@@ -243,6 +243,15 @@
             <label>Message</label>
             <textarea id="messageInput" placeholder="Paste your message here…"></textarea>
           </div>
+          <div class="field">
+            <label>Send Delay: <span id="delayLabel">300ms</span></label>
+            <input type="range" id="delaySlider" min="300" max="2000" step="50" value="300"
+              oninput="updateDelayLabel(this.value)"
+              style="width:100%;accent-color:var(--accent);cursor:pointer;margin-top:4px;" />
+            <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);margin-top:2px;">
+              <span>300ms (fastest)</span><span>2s (slowest)</span>
+            </div>
+          </div>
           <div class="row">
             <button class="btn btn-primary btn-full" onclick="sendMessage()" id="sendBtn">Send Message</button>
           </div>
@@ -379,13 +388,33 @@
       } catch { toast('Failed to save Channel ID', 'error'); }
     }
 
+    function updateDelayLabel(val) {
+      const ms = parseInt(val);
+      document.getElementById('delayLabel').textContent = ms >= 1000 ? (ms / 1000).toFixed(1) + 's' : ms + 'ms';
+    }
+
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
     async function sendMessage() {
       const message = document.getElementById('messageInput').value.trim();
       const channelId = document.getElementById('channelIdInput').value.trim() || state.clipboardMessenger.channelId;
       if (!message) return toast('Message cannot be empty', 'error');
       if (!channelId) return toast('Please enter a Channel ID first', 'error');
+      const delay = parseInt(document.getElementById('delaySlider').value);
       const btn = document.getElementById('sendBtn');
-      btn.disabled = true; btn.textContent = 'Sending…';
+      btn.disabled = true;
+      if (delay > 300) {
+        let remaining = delay;
+        const interval = setInterval(() => {
+          remaining -= 100;
+          btn.textContent = remaining > 0 ? `Sending in ${(remaining/1000).toFixed(1)}s…` : 'Sending…';
+          if (remaining <= 0) clearInterval(interval);
+        }, 100);
+        btn.textContent = `Sending in ${(delay/1000).toFixed(1)}s…`;
+        await sleep(delay);
+        clearInterval(interval);
+      }
+      btn.textContent = 'Sending…';
       try {
         const res = await fetch(`${API}/send-message`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
