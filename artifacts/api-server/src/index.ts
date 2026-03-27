@@ -2,18 +2,11 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { startBot } from "./lib/bot";
 
-const rawPort = process.env["PORT"];
-
-if (!rawPort) {
-  throw new Error(
-    "PORT environment variable is required but was not provided.",
-  );
-}
-
-const port = Number(rawPort);
+// Default to 10000 for Render deployments; Replit injects its own PORT at runtime.
+const port = Number(process.env["PORT"] ?? 10000);
 
 if (Number.isNaN(port) || port <= 0) {
-  throw new Error(`Invalid PORT value: "${rawPort}"`);
+  throw new Error(`Invalid PORT value: "${process.env["PORT"]}"`);
 }
 
 app.listen(port, async (err) => {
@@ -22,6 +15,6 @@ app.listen(port, async (err) => {
     process.exit(1);
   }
 
-  logger.info({ port }, "Server listening");
+  logger.info({ port }, "Server listening — dashboard at http://localhost:" + port);
   await startBot();
 });

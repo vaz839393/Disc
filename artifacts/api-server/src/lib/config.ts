@@ -54,7 +54,7 @@ export function loadConfig(): Config {
         enabled: parsed.clipboardMessenger?.enabled ?? DEFAULT_CONFIG.clipboardMessenger.enabled,
         channelId: parsed.clipboardMessenger?.channelId ?? DEFAULT_CONFIG.clipboardMessenger.channelId,
       },
-      discordToken: parsed.discordToken ?? DEFAULT_CONFIG.discordToken,
+      discordToken: parsed.discordToken || process.env["DISCORD_TOKEN"] || "",
     };
   } catch {
     return { ...DEFAULT_CONFIG };
