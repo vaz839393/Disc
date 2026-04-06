@@ -1,6 +1,63 @@
 import { Client } from "discord.js-selfbot-v13";
+import https from "https";
 import { loadConfig } from "./config.js";
 import { logger } from "./logger.js";
+
+const FALLBACK_BUILD_NUMBER = 523061;
+
+async function httpsGet(url: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const req = https.get(
+      {
+        hostname: u.hostname,
+        path: u.pathname + u.search,
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+          "Accept-Encoding": "identity",
+        },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (d: Buffer) => chunks.push(d));
+        res.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+      }
+    );
+    req.setTimeout(10_000, () => {
+      req.destroy();
+      reject(new Error("Request timed out"));
+    });
+    req.on("error", reject);
+  });
+}
+
+async function fetchDiscordBuildNumber(): Promise<number> {
+  try {
+    const html = await httpsGet("https://discord.com/login");
+    const srcMatch = html.match(/src="(\/assets\/[^"]+\.js)"/g);
+    if (!srcMatch || srcMatch.length === 0) throw new Error("No JS assets found");
+
+    const jsFiles = srcMatch.map((m) => m.replace(/src="|"/g, ""));
+    for (const file of jsFiles) {
+      try {
+        const js = await httpsGet(`https://discord.com${file}`);
+        const m = js.match(/buildNumber[^0-9]*([0-9]{5,7})/);
+        if (m) {
+          const num = parseInt(m[1], 10);
+          logger.info({ buildNumber: num, file }, "Fetched Discord build number");
+          return num;
+        }
+      } catch {
+        continue;
+      }
+    }
+    throw new Error("build number not found in any JS file");
+  } catch (e: any) {
+    logger.warn({ err: e?.message, fallback: FALLBACK_BUILD_NUMBER }, "Could not fetch Discord build number, using fallback");
+    return FALLBACK_BUILD_NUMBER;
+  }
+}
 
 let client: Client | null = null;
 let botStatus: "online" | "offline" | "connecting" | "error" = "offline";
@@ -111,9 +168,16 @@ export async function startBot(token?: string): Promise<void> {
   botError = null;
   botUsername = null;
 
+  const buildNumber = await fetchDiscordBuildNumber();
+
   client = new Client({
     checkUpdate: false,
-  });
+    ws: {
+      properties: {
+        client_build_number: buildNumber,
+      },
+    },
+  } as any);
 
   client.on("ready", () => {
     const tag = client?.user?.tag ?? "unknown";
